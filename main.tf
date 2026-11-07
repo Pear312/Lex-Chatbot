@@ -90,7 +90,6 @@ resource "aws_lexv2models_intent" "Hello" {
       }
     }
   }
-
 }
 
 resource "aws_lexv2models_intent" "fallback" {
@@ -149,3 +148,133 @@ resource "aws_lexv2models_intent" "fallback" {
     }
   }
 }
+
+
+resource "aws_lexv2models_intent" "check_balance" {
+  name        = "CheckBalance"
+  description = "Intent to check the balance in the specified account type."
+
+  bot_id      = aws_lexv2models_bot.BankerBot.id
+  bot_version = aws_lexv2models_bot_locale.specs.bot_version
+  locale_id   = aws_lexv2models_bot_locale.specs.locale_id
+
+  dynamic "sample_utterance" {
+    for_each = var.check_balance_utterances
+
+    content {
+      utterance = sample_utterance.value
+    }
+  }
+
+  closing_setting {
+    
+  }
+
+  // There is a circular dependancy problem when trying to establish the slot priorities
+  // The intent needs the slot and vice versa.
+  # slot_priority {
+  #   priority = 1
+  #   slot_id  = aws_lexv2models_slot.bank_account_types.slot_id
+  # }
+
+  # slot_priority {
+  #   priority = 2
+  #   slot_id  = aws_lexv2models_slot.date_of_birth.slot_id
+  # }
+
+  lifecycle {
+    ignore_changes = [slot_priority]
+  }
+}
+
+// Slots
+resource "aws_lexv2models_slot_type" "bank_account_types" {
+  name = "accountType"
+  bot_id      = aws_lexv2models_bot.BankerBot.id
+  bot_version = aws_lexv2models_bot_locale.specs.bot_version
+  locale_id   = aws_lexv2models_bot_locale.specs.locale_id
+
+  value_selection_setting {
+    resolution_strategy = "TopResolution"
+  }
+
+  slot_type_values {
+    sample_value {
+      value = "checking"
+    }
+  }
+
+  slot_type_values {
+    sample_value {
+      value = "savings"
+    }
+  }
+
+  slot_type_values {
+    sample_value {
+      value = "credit"
+    }
+    dynamic "synonyms" {
+      for_each = var.credit_syn
+      content {
+        value = synonyms.value
+      }
+    }
+  }
+}
+
+resource "aws_lexv2models_slot" "bank_account_types" {
+  name         = "accountType"
+
+  bot_id       = aws_lexv2models_bot.BankerBot.id
+  bot_version  = aws_lexv2models_bot_locale.specs.bot_version
+  intent_id    = aws_lexv2models_intent.check_balance.intent_id
+  locale_id    = aws_lexv2models_bot_locale.specs.locale_id
+  slot_type_id = aws_lexv2models_slot_type.bank_account_types.slot_type_id
+
+  value_elicitation_setting {
+    slot_constraint = "Required"
+    
+    prompt_specification {
+      max_retries = 2
+      allow_interrupt = true
+      message_selection_strategy = "Random"
+      message_group {
+        message {
+          plain_text_message {
+            value = "For which account would you like your balance?"
+          }
+        }
+      }
+      
+    }
+  }
+}
+
+resource "aws_lexv2models_slot" "date_of_birth" {
+  name = "dateOfBirth"
+
+  bot_id       = aws_lexv2models_bot.BankerBot.id
+  bot_version  = aws_lexv2models_bot_locale.specs.bot_version
+  intent_id    = aws_lexv2models_intent.check_balance.intent_id
+  locale_id    = aws_lexv2models_bot_locale.specs.locale_id
+  slot_type_id = "AMAZON.Date"
+
+  value_elicitation_setting {
+    slot_constraint = "Required"
+
+    prompt_specification {
+      max_retries = 2
+      allow_interrupt = true
+      message_selection_strategy = "Random"
+      message_group {
+        message {
+          plain_text_message {
+            value = "For verification purposes, what is your date of birth?"
+          }
+        }
+      }
+    }
+  }
+}
+
