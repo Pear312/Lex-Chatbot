@@ -167,7 +167,16 @@ resource "aws_lexv2models_intent" "check_balance" {
   }
 
   closing_setting {
-    
+    active = true
+    closing_response {
+      message_group {
+        message {
+          plain_text_message {
+            value = "Checking your account balance."
+          }
+        }
+      }
+    }
   }
 
   // There is a circular dependancy problem when trying to establish the slot priorities
@@ -186,6 +195,7 @@ resource "aws_lexv2models_intent" "check_balance" {
     ignore_changes = [slot_priority]
   }
 }
+
 
 // Slots
 resource "aws_lexv2models_slot_type" "bank_account_types" {
@@ -278,3 +288,37 @@ resource "aws_lexv2models_slot" "date_of_birth" {
   }
 }
 
+resource "null_resource" "slot_priority" {
+  triggers = {
+    slot_a = aws_lexv2models_slot.bank_account_types.slot_id
+    slot_b = aws_lexv2models_slot.date_of_birth.slot_id
+    utterances = jsonencode(var.check_balance_utterances)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["Powershell", "-Command"]
+
+    environment = {
+      UTTERANCES = jsonencode([for u in var.check_balance_utterances : { utterance = u }])
+    }
+
+    command = <<EOT
+      aws lexv2-models update-intent `
+      --bot-id ${aws_lexv2models_bot.BankerBot.id} `
+      --bot-version ${aws_lexv2models_bot_locale.specs.bot_version} `
+      --locale-id ${aws_lexv2models_bot_locale.specs.locale_id} `
+      --intent-id ${aws_lexv2models_intent.check_balance.intent_id} `
+      --intent-name ${aws_lexv2models_intent.check_balance.name} `
+      --description "${aws_lexv2models_intent.check_balance.description}" `
+      --sample-utterances ($env:UTTERANCES.Replace('"','\"')) `
+      --slot-priorities priority=1,slotId=${aws_lexv2models_slot.bank_account_types.slot_id} priority=2,slotId=${aws_lexv2models_slot.date_of_birth.slot_id} `
+      --region ${var.region} `
+      --no-cli-pager
+    EOT
+  }
+
+  depends_on = [ 
+    aws_lexv2models_slot.bank_account_types,
+    aws_lexv2models_slot.date_of_birth
+  ]
+}
